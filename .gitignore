@@ -1,1 +1,5 @@
 build/
+
+# Fitted model packs are unpublished research output. Generate them locally
+# with tools/pack_from_essg.py; do not commit them to a public repository.
+models/essg-*.json

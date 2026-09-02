@@ -4,214 +4,761 @@
   "title": "Deformity Consultation Console model pack",
   "description": "A self-contained description of the variables to collect and the models to fit them to. The console holds no models of its own; a pack is the whole of its clinical content.",
   "type": "object",
-  "required": ["schemaVersion", "pack", "variables", "models"],
+  "required": [
+    "schemaVersion",
+    "pack",
+    "variables",
+    "models"
+  ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
-
+    "schemaVersion": {
+      "enum": [
+        "1.0",
+        "1.1"
+      ],
+      "description": "1.0 packs describe models as readable terms. 1.1 adds the design-matrix engine for models exported with their full design matrix and covariance."
+    },
     "pack": {
       "type": "object",
-      "required": ["name", "validationStatus"],
+      "required": [
+        "name",
+        "validationStatus"
+      ],
       "properties": {
-        "id": { "type": "string", "description": "Stable identifier. Saved cases record it so a case is never silently scored by a different pack." },
-        "name": { "type": "string" },
-        "version": { "type": "string", "description": "Bump on any coefficient change. It is printed on every patient report." },
-        "population": { "type": "string", "description": "Who the models were fitted on. Printed on the patient report." },
+        "id": {
+          "type": "string",
+          "description": "Stable identifier. Saved cases record it so a case is never silently scored by a different pack."
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "description": "Bump on any coefficient change. It is printed on every patient report."
+        },
+        "population": {
+          "type": "string",
+          "description": "Who the models were fitted on. Printed on the patient report."
+        },
         "validationStatus": {
-          "enum": ["validated", "externally-validated", "internally-validated", "demonstration"],
+          "enum": [
+            "validated",
+            "externally-validated",
+            "internally-validated",
+            "demonstration"
+          ],
           "description": "Anything other than the first three marks the pack as a demonstration: the console then bars it from clinical framing and watermarks every report SPECIMEN."
         },
-        "authors": { "type": "string" },
-        "institution": { "type": "string" },
-        "citation": { "type": "string" },
-        "lastUpdated": { "type": "string" },
-        "notes": { "type": "string" }
+        "authors": {
+          "type": "string"
+        },
+        "institution": {
+          "type": "string"
+        },
+        "citation": {
+          "type": "string"
+        },
+        "lastUpdated": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
       }
     },
-
     "report": {
       "type": "object",
       "description": "Plain-language text for the patient-facing document.",
       "properties": {
-        "intro": { "type": "string" },
-        "naturalHistory": { "type": "string", "description": "What is known about the course without surgery. Say plainly if the pack cannot speak to it." },
-        "questions": { "type": "array", "items": { "type": "string" } },
-        "closing": { "type": "string" }
+        "intro": {
+          "type": "string"
+        },
+        "naturalHistory": {
+          "type": "string",
+          "description": "What is known about the course without surgery. Say plainly if the pack cannot speak to it."
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "closing": {
+          "type": "string"
+        }
       }
     },
-
     "variableGroups": {
       "type": "array",
       "description": "Sections of the consultation form, rendered in the order given.",
       "items": {
         "type": "object",
-        "required": ["id", "label"],
+        "required": [
+          "id",
+          "label"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "label": { "type": "string" },
-          "note": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       }
     },
-
     "variables": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "label", "type"],
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "description": "Referenced by model terms and expressions." },
-          "label": { "type": "string" },
-          "type": { "enum": ["number", "boolean", "categorical", "text"] },
-          "unit": { "type": "string" },
-          "group": { "type": "string" },
-          "help": { "type": "string" },
-          "min": { "type": "number" },
-          "max": { "type": "number" },
-          "step": { "type": "number" },
-          "decimals": { "type": "integer" },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "description": "Referenced by model terms and expressions."
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "number",
+              "boolean",
+              "categorical",
+              "text"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "step": {
+            "type": "number"
+          },
+          "decimals": {
+            "type": "integer"
+          },
           "derivationRange": {
-            "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
             "description": "The range actually present in the derivation cohort. A case outside it is flagged in the form and on every prediction card as an extrapolation."
           },
-          "reference": { "description": "Value of a typical derivation-cohort case. Used only to make the driver chart interpretable; never substituted for a missing value. Defaults to the midpoint of derivationRange, false, or the first option." },
+          "reference": {
+            "description": "Value of a typical derivation-cohort case. Used only to make the driver chart interpretable; never substituted for a missing value. Defaults to the midpoint of derivationRange, false, or the first option."
+          },
           "options": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["value", "label"],
-              "properties": { "value": { "type": "string" }, "label": { "type": "string" } }
+              "required": [
+                "value",
+                "label"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
             }
           },
-          "modifiable": { "enum": ["patient", "plan"], "description": "Shows the variable on the What-would-change-it screen, in the patient's column or the surgeon's." },
-          "optimized": { "description": "The value the what-if screen moves this variable to." }
+          "modifiable": {
+            "enum": [
+              "patient",
+              "plan"
+            ],
+            "description": "Shows the variable on the What-would-change-it screen, in the patient's column or the surgeon's."
+          },
+          "optimized": {
+            "description": "The value the what-if screen moves this variable to."
+          }
         }
       }
     },
-
     "derived": {
       "type": "array",
       "description": "Values computed from other variables (PI minus LL, unit conversions, ratios). Shown read-only on the form and usable in model terms.",
       "items": {
         "type": "object",
-        "required": ["id", "expression"],
+        "required": [
+          "id",
+          "expression"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "label": { "type": "string" },
-          "unit": { "type": "string" },
-          "group": { "type": "string" },
-          "decimals": { "type": "integer" },
-          "help": { "type": "string" },
-          "expression": { "type": "string", "description": "Arithmetic over variable ids. See the expression grammar in docs/MODEL_PACK_GUIDE.md." }
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "label": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "decimals": {
+            "type": "integer"
+          },
+          "help": {
+            "type": "string"
+          },
+          "expression": {
+            "type": "string",
+            "description": "Arithmetic over variable ids. See the expression grammar in docs/MODEL_PACK_GUIDE.md."
+          }
         }
       }
     },
-
     "mcid": {
       "type": "object",
       "description": "Documentation of the minimal clinically important differences the outcome definitions rest on.",
       "additionalProperties": {
         "type": "object",
-        "properties": { "label": { "type": "string" }, "value": { "type": "number" }, "note": { "type": "string" } }
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
       }
     },
-
     "models": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "label", "kind", "type", "terms"],
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "label": { "type": "string" },
-          "shortLabel": { "type": "string", "description": "Used in the readout panel and the what-if table headers." },
-          "kind": { "enum": ["risk", "benefit"], "description": "Drives colour, wording and which section of the patient report the estimate lands in." },
-          "type": { "enum": ["logistic", "linear", "cox"] },
-          "timepoint": { "type": "string" },
-          "unit": { "type": "string", "description": "Linear models only." },
-          "lowerIsBetter": { "type": "boolean", "description": "Linear models only." },
-          "baselineRate": { "type": "number", "minimum": 0, "maximum": 1, "description": "Observed event rate in the derivation cohort. Drawn beside the estimate so a number can be read against its base rate." },
-          "intercept": { "type": "number", "description": "Not used by cox models, whose baseline is carried by baselineSurvival." },
-          "sigma": { "type": "number", "description": "Linear models: residual standard deviation. Without it no interval and no threshold probabilities are shown." },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "shortLabel": {
+            "type": "string",
+            "description": "Used in the readout panel and the what-if table headers."
+          },
+          "kind": {
+            "enum": [
+              "risk",
+              "benefit"
+            ],
+            "description": "Drives colour, wording and which section of the patient report the estimate lands in."
+          },
+          "engine": {
+            "enum": [
+              "terms",
+              "design"
+            ],
+            "default": "terms",
+            "description": "\"terms\" (the default) reads the coefficient list below. \"design\" reads the design block instead, for a model exported with its full design matrix — required for natural splines, and for Fine-Gray models whose intervals need the baseline-hazard variance."
+          },
+          "design": {
+            "type": "object",
+            "description": "Present when engine is \"design\". Mirrors the export produced by the analysis pipeline: coefficients, their covariance, and each variable's design columns with its basis sampled over a grid so that spline bases need not be recomputed in the browser.",
+            "required": [
+              "kind",
+              "cols",
+              "beta",
+              "vcov",
+              "vars"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "logistic",
+                  "competing_risks"
+                ]
+              },
+              "cols": {
+                "type": "array",
+                "description": "Design-matrix column names, in order. \"(Intercept)\" first where the model has one."
+              },
+              "beta": {
+                "type": "array",
+                "description": "Fitted coefficients, aligned to cols."
+              },
+              "vcov": {
+                "type": "array",
+                "description": "Coefficient covariance matrix. Supplies the 95% interval as var(lp) = x'Vx."
+              },
+              "vars": {
+                "type": "object",
+                "description": "One entry per predictor, keyed by the pack variable id.",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "cols",
+                    "basis"
+                  ],
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "continuous",
+                        "binary",
+                        "categorical"
+                      ]
+                    },
+                    "cols": {
+                      "description": "1-based design-matrix columns this variable occupies."
+                    },
+                    "basis": {
+                      "description": "Design values. For a continuous variable, each column sampled over n points from lo to hi, interpolated at scoring time. For a categorical one, the value per level in keys order."
+                    },
+                    "lo": {
+                      "type": "number",
+                      "description": "Continuous only. Values below it are scored at this edge and reported as out of range."
+                    },
+                    "hi": {
+                      "type": "number"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "description": "Continuous only. Number of grid points in basis."
+                    },
+                    "median": {
+                      "type": "number",
+                      "description": "Continuous only. The cohort reference used by the driver chart."
+                    },
+                    "keys": {
+                      "type": "array",
+                      "description": "Categorical and binary only. Level keys in basis order; binary variables use \"0\" and \"1\"."
+                    }
+                  }
+                }
+              },
+              "horizons": {
+                "type": "array",
+                "description": "Competing risks only. Times, in the unit the pack reports."
+              },
+              "baseline_H0": {
+                "type": "array",
+                "description": "Competing risks only. Baseline cumulative subdistribution hazard at each horizon."
+              },
+              "var_a": {
+                "type": "array",
+                "description": "Competing risks only. Baseline-variance term a(t) of var(log Λ(t|x)) = a(t) + b(t)'x + x'Vx."
+              },
+              "var_b": {
+                "type": "array",
+                "description": "Competing risks only. The b(t) vectors, one row per horizon."
+              }
+            }
+          },
+          "primaryHorizon": {
+            "type": "number",
+            "description": "Competing-risks design models: which horizon carries the headline figure. Must be one of design.horizons."
+          },
+          "cohortCurve": {
+            "type": "array",
+            "description": "Observed cumulative incidence in the derivation cohort, drawn behind the patient's curve as a reference.",
+            "items": {
+              "type": "object",
+              "required": [
+                "year",
+                "risk"
+              ],
+              "properties": {
+                "year": {
+                  "type": "number"
+                },
+                "risk": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "type": {
+            "enum": [
+              "logistic",
+              "linear",
+              "cox"
+            ]
+          },
+          "timepoint": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string",
+            "description": "Linear models only."
+          },
+          "lowerIsBetter": {
+            "type": "boolean",
+            "description": "Linear models only."
+          },
+          "baselineRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Observed event rate in the derivation cohort. Drawn beside the estimate so a number can be read against its base rate."
+          },
+          "intercept": {
+            "type": "number",
+            "description": "Not used by cox models, whose baseline is carried by baselineSurvival."
+          },
+          "sigma": {
+            "type": "number",
+            "description": "Linear models: residual standard deviation. Without it no interval and no threshold probabilities are shown."
+          },
           "thresholds": {
             "type": "array",
             "description": "Linear models: levels whose probability of being reached is worth stating.",
             "items": {
               "type": "object",
-              "required": ["label", "op", "value"],
-              "properties": { "label": { "type": "string" }, "op": { "enum": ["<=", "<", ">=", ">"] }, "value": { "type": "number" } }
+              "required": [
+                "label",
+                "op",
+                "value"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "op": {
+                  "enum": [
+                    "<=",
+                    "<",
+                    ">=",
+                    ">"
+                  ]
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
             }
           },
-          "horizonMonths": { "type": "number", "description": "Cox models: the time the reported risk refers to." },
-          "lpMean": { "type": "number", "description": "Cox models: mean linear predictor in the derivation cohort, which baselineSurvival is centred on. Defaults to 0." },
+          "horizonMonths": {
+            "type": "number",
+            "description": "Cox models: the time the reported risk refers to."
+          },
+          "lpMean": {
+            "type": "number",
+            "description": "Cox models: mean linear predictor in the derivation cohort, which baselineSurvival is centred on. Defaults to 0."
+          },
           "baselineSurvival": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["t", "s0"],
-              "properties": { "t": { "type": "number" }, "s0": { "type": "number", "minimum": 0, "maximum": 1 } }
+              "required": [
+                "t",
+                "s0"
+              ],
+              "properties": {
+                "t": {
+                  "type": "number"
+                },
+                "s0": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
             }
           },
           "recalibration": {
             "type": "object",
             "description": "Applied to the linear predictor before the link, for fitting a published model to local outcomes.",
-            "properties": { "intercept": { "type": "number" }, "slope": { "type": "number" } }
+            "properties": {
+              "intercept": {
+                "type": "number"
+              },
+              "slope": {
+                "type": "number"
+              }
+            }
           },
           "terms": {
             "type": "array",
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["coef"],
-              "oneOf": [{ "required": ["var"] }, { "required": ["expr"] }],
+              "required": [
+                "coef"
+              ],
+              "oneOf": [
+                {
+                  "required": [
+                    "var"
+                  ]
+                },
+                {
+                  "required": [
+                    "expr"
+                  ]
+                }
+              ],
               "properties": {
-                "var": { "type": "string" },
-                "expr": { "type": "string", "description": "An arithmetic expression, for interactions and anything the transforms do not cover." },
-                "coef": { "type": "number" },
-                "label": { "type": "string", "description": "How this term is named in the driver chart. Write it for a clinician, not for the model file." },
-                "transform": { "enum": ["identity", "center", "z", "log", "log1p", "sqrt", "square", "level", "threshold", "rcs"] },
-                "center": { "type": "number" },
-                "mean": { "type": "number" },
-                "sd": { "type": "number" },
-                "level": { "type": "string", "description": "transform \"level\": the categorical value this indicator stands for." },
-                "cut": { "type": "number" },
-                "op": { "enum": [">=", ">", "<=", "<"] },
-                "knots": { "type": "array", "items": { "type": "number" }, "minItems": 3 },
-                "basis": { "type": "integer", "minimum": 1, "description": "Which restricted cubic spline basis this coefficient belongs to, 1 to k-2." }
+                "var": {
+                  "type": "string"
+                },
+                "expr": {
+                  "type": "string",
+                  "description": "An arithmetic expression, for interactions and anything the transforms do not cover."
+                },
+                "coef": {
+                  "type": "number"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "How this term is named in the driver chart. Write it for a clinician, not for the model file."
+                },
+                "transform": {
+                  "enum": [
+                    "identity",
+                    "center",
+                    "z",
+                    "log",
+                    "log1p",
+                    "sqrt",
+                    "square",
+                    "level",
+                    "threshold",
+                    "rcs"
+                  ]
+                },
+                "center": {
+                  "type": "number"
+                },
+                "mean": {
+                  "type": "number"
+                },
+                "sd": {
+                  "type": "number"
+                },
+                "level": {
+                  "type": "string",
+                  "description": "transform \"level\": the categorical value this indicator stands for."
+                },
+                "cut": {
+                  "type": "number"
+                },
+                "op": {
+                  "enum": [
+                    ">=",
+                    ">",
+                    "<=",
+                    "<"
+                  ]
+                },
+                "knots": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3
+                },
+                "basis": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Which restricted cubic spline basis this coefficient belongs to, 1 to k-2."
+                }
               }
-            }
+            },
+            "description": "Required unless engine is \"design\"."
           },
           "performance": {
             "type": "object",
             "description": "Printed under every estimate. A pack that omits it asks to be trusted without evidence.",
             "properties": {
-              "auc": { "type": ["number", "null"] },
-              "cIndex": { "type": ["number", "null"] },
-              "r2": { "type": ["number", "null"] },
-              "rmse": { "type": ["number", "null"] },
-              "calibrationSlope": { "type": ["number", "null"] },
-              "calibrationIntercept": { "type": ["number", "null"] },
-              "brier": { "type": ["number", "null"] },
-              "n": { "type": ["integer", "null"] },
-              "events": { "type": ["integer", "null"] },
-              "validation": { "type": "string", "description": "How it was validated: apparent, bootstrap-corrected, split-sample, external cohort." }
+              "auc": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cIndex": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "r2": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rmse": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "calibrationSlope": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "calibrationIntercept": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "brier": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "n": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "events": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "validation": {
+                "type": "string",
+                "description": "How it was validated: apparent, bootstrap-corrected, split-sample, external cohort."
+              },
+              "c": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Discrimination. For a binary model the C statistic; for a competing-risks model the time-dependent AUC at the primary horizon. Below 0.65 the console warns on the card."
+              },
+              "cLo": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cHi": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cApparent": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Apparent performance in the derivation sample. Never quote it on its own."
+              },
+              "cOptimismCorrected": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "oe": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Observed-to-expected ratio. Outside 0.8 to 1.25 the console warns on the card."
+              },
+              "centres": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Number of centres the model was cross-validated across."
+              },
+              "byHorizon": {
+                "type": "array",
+                "description": "Competing-risks models: discrimination at each horizon.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "year": {
+                      "type": "number"
+                    },
+                    "c": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "cLo": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "cHi": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
             }
           },
           "patient": {
             "type": "object",
             "description": "The words used on the patient report. Write them at reading age 12: no odds, no relative risks, no jargon.",
             "properties": {
-              "title": { "type": "string" },
-              "positive": { "type": "string", "description": "Completes: \"About N in 100 patients with this profile ...\"" },
-              "negative": { "type": "string", "description": "Completes: \"The other M ...\"" },
-              "explain": { "type": "string" }
+              "title": {
+                "type": "string"
+              },
+              "positive": {
+                "type": "string",
+                "description": "Completes: \"About N in 100 patients with this profile ...\""
+              },
+              "negative": {
+                "type": "string",
+                "description": "Completes: \"The other M ...\""
+              },
+              "explain": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "exampleCase": {
       "type": "object",
       "description": "Values loaded when the pack opens, so the console shows what it does rather than an empty shell. Never a real patient.",

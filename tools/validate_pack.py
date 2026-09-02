@@ -35,12 +35,72 @@ def expression_identifiers(expr):
     return idents, bad
 
 
+def as_list(x):
+    """jsonlite collapses length-1 vectors on export."""
+    return x if isinstance(x, list) else [x]
+
+
+def check_design(m, mid, ids, err, warn):
+    """A model carrying its own design matrix rather than a list of terms."""
+    d = m.get("design")
+    if not isinstance(d, dict):
+        err('Model "%s" declares engine "design" but has no design block.' % mid)
+        return
+    if d.get("kind") not in {"logistic", "competing_risks"}:
+        err('Design model "%s" has unsupported kind %r.' % (mid, d.get("kind")))
+    cols, beta = as_list(d.get("cols") or []), as_list(d.get("beta") or [])
+    if not cols or not beta:
+        err('Design model "%s" needs cols and beta.' % mid)
+    elif len(cols) != len(beta):
+        err('Design model "%s" has %d columns but %d coefficients.' % (mid, len(cols), len(beta)))
+    if not d.get("vcov"):
+        err('Design model "%s" has no vcov, so no interval can be shown.' % mid)
+    seen = set()
+    for name, v in (d.get("vars") or {}).items():
+        if name not in ids:
+            err('Design model "%s" scores "%s", which is not a variable in this pack.' % (mid, name))
+        vcols = as_list(v.get("cols") or [])
+        if not vcols:
+            err('Design model "%s": variable "%s" occupies no columns.' % (mid, name))
+        for c in vcols:
+            if not 1 <= c <= len(cols):
+                err('Design model "%s": variable "%s" points at column %s, outside 1-%d.' % (mid, name, c, len(cols)))
+            if c in seen:
+                err('Design model "%s": column %s is claimed by more than one variable.' % (mid, c))
+            seen.add(c)
+        if v.get("type") == "continuous":
+            if v.get("lo") is None or v.get("hi") is None or not v.get("n"):
+                err('Design model "%s": continuous variable "%s" needs lo, hi and n.' % (mid, name))
+            basis = v.get("basis")
+            grid = basis if basis and isinstance(basis[0], list) else [basis]
+            for col in grid:
+                if col is not None and len(col) != v.get("n"):
+                    err('Design model "%s": basis for "%s" has %d points but n is %s.' % (mid, name, len(col), v.get("n")))
+        elif not v.get("keys"):
+            err('Design model "%s": variable "%s" is categorical but declares no keys.' % (mid, name))
+    if not d.get("vars"):
+        err('Design model "%s" declares no variables.' % mid)
+    if d.get("kind") == "competing_risks":
+        hz = as_list(d.get("horizons") or [])
+        if not hz or not d.get("baseline_H0"):
+            err('Competing-risks model "%s" needs horizons and baseline_H0.' % mid)
+        elif len(hz) != len(as_list(d["baseline_H0"])):
+            err('Competing-risks model "%s" has %d horizons but %d baseline hazards.' % (mid, len(hz), len(as_list(d["baseline_H0"]))))
+        if not d.get("var_a") or not d.get("var_b"):
+            warn('Competing-risks model "%s" has no var_a/var_b, so its intervals ignore baseline-hazard uncertainty.' % mid)
+        if m.get("primaryHorizon") and m["primaryHorizon"] not in hz:
+            err('Model "%s" names primary horizon %s, which is not among its horizons.' % (mid, m["primaryHorizon"]))
+    c = (m.get("performance") or {}).get("c")
+    if isinstance(c, (int, float)) and c < 0.65:
+        warn('Model "%s" discriminates weakly (C %.2f); the console will say so on the card.' % (mid, c))
+
+
 def check(pack):
     errors, warnings = [], []
     err, warn = errors.append, warnings.append
 
-    if pack.get("schemaVersion") != "1.0":
-        warn('schemaVersion is %r; the console was built for "1.0".' % pack.get("schemaVersion"))
+    if pack.get("schemaVersion") not in ("1.0", "1.1"):
+        warn('schemaVersion is %r; the console was built for "1.0" and "1.1".' % pack.get("schemaVersion"))
     meta = pack.get("pack") or {}
     if not meta.get("name"):
         err("pack.name is required.")
@@ -106,10 +166,13 @@ def check(pack):
         if mid in seen_models:
             err('Duplicate model id "%s".' % mid)
         seen_models.add(mid)
-        if m.get("type") not in {"logistic", "linear", "cox"}:
-            err('Model "%s" has unsupported type %r.' % (mid, m.get("type")))
         if m.get("kind") not in {"risk", "benefit"}:
             err('Model "%s" must declare kind "risk" or "benefit".' % mid)
+        if m.get("engine") == "design":
+            check_design(m, mid, ids, err, warn)
+            continue
+        if m.get("type") not in {"logistic", "linear", "cox"}:
+            err('Model "%s" has unsupported type %r.' % (mid, m.get("type")))
         if m.get("type") == "cox" and not (m.get("baselineSurvival") or []):
             err('Cox model "%s" needs baselineSurvival.' % mid)
         if m.get("type") == "cox":

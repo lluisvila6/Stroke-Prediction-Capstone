@@ -30,11 +30,35 @@ Three things it deliberately will not do: it does not impute (a model missing an
 input produces nothing, never a number resting on a guess), it does not decide,
 and it does not vouch for the models it runs.
 
-## The model pack
+## Running the ESSG models
 
-The console ships with no clinical models. Everything it predicts comes from a
-JSON *model pack* — variables, coefficients, provenance and the patient-facing
-wording — loaded through **Model pack → Replace the pack**.
+The console ships with no clinical models. To run the ESSG adult spinal
+deformity risk-benefit models, convert the analysis package into a pack on your
+own machine and load it through **Model pack → Replace the pack**:
+
+```
+python3 tools/pack_from_essg.py /path/to/ASD_RiskBenefitPackage -o essg-asd-pack.json
+python3 tools/validate_pack.py essg-asd-pack.json
+```
+
+That gives eleven models — major and neurological complications at 90 days,
+reoperation, junctional failure and late fusion failure as annual cumulative
+incidence with death as a competing risk, and the MCID, PASS and deterioration
+outcomes at two years — each with its 95% interval and its leave-one-centre-out
+validation.
+
+Scoring reuses the arithmetic of `predict.js` from that package, which was
+checked against R over the derivation cohort. The console reproduces it to the
+last bit: 3,300 random cases across all eleven models give a maximum absolute
+difference of exactly zero, in both the point estimates and the intervals.
+
+**The generated pack is not in this repository and should not be.** It carries
+unpublished fitted coefficients; `.gitignore` keeps `models/essg-*.json` out.
+
+## The model pack format
+
+A pack is one JSON file — variables, coefficients, provenance and the
+patient-facing wording.
 
 | File | |
 |---|---|
@@ -42,10 +66,15 @@ wording — loaded through **Model pack → Replace the pack**.
 | [`models/model-pack.schema.json`](models/model-pack.schema.json) | JSON Schema for the format |
 | [`models/TEMPLATE-pack.json`](models/TEMPLATE-pack.json) | Blank skeleton to fill in |
 | [`models/demo-asd-pack.json`](models/demo-asd-pack.json) | Worked example exercising every feature |
+| [`tools/pack_from_essg.py`](tools/pack_from_essg.py) | Converts an ESSG analysis package into a pack |
 
-Logistic, linear and Cox models are supported, with centring, standardisation,
-log/sqrt/square transforms, categorical indicators, thresholds, restricted cubic
-splines, arbitrary interaction expressions, and external-model recalibration.
+Two ways to describe a model. Write it as **readable terms** — logistic, linear
+or Cox, with centring, standardisation, log/sqrt/square transforms, categorical
+indicators, thresholds, restricted cubic splines, interaction expressions and
+external-model recalibration. Or hand over the **design matrix** as fitted:
+coefficients, their covariance, and each continuous variable's basis sampled
+over a grid, which is what natural splines and Fine-Gray models need in order to
+keep their intervals honest.
 
 Validate a pack before it reaches a consultation:
 
@@ -64,6 +93,7 @@ SPECIMEN. Load your own pack before showing a number to anyone.
 app/asd-decision-support.html   the console — the only file you need to open
 models/                          pack schema, template, and the demo pack
 docs/MODEL_PACK_GUIDE.md         how to author a pack
+tools/pack_from_essg.py          convert an ESSG analysis package into a pack
 tools/validate_pack.py           check a pack from the command line
 tools/export_pack.py             re-export the built-in pack to models/
 tools/make_artifact.py           build the publishable copy
@@ -82,6 +112,10 @@ tools/make_artifact.py           build the publishable copy
   you entered, so treat it as a clinical record.
 - **Regulatory status.** Not a medical device. Not assessed by any regulator.
   The models are the pack author's, and so is responsibility for them.
+- **Weak models say so.** When a pack reports discrimination below C 0.65, or a
+  calibration slope outside 0.7–1.4, the card carries a warning saying the
+  estimate should carry little weight. Three of the eleven ESSG models trigger
+  it.
 
 ## Earlier work in this repository
 

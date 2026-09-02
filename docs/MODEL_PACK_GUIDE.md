@@ -140,7 +140,77 @@ directly as long as you carry the knot locations across with them.
 
 ---
 
-## 5. The three model types
+## 4b. Models that carry their own design matrix
+
+Some models cannot be written as a readable list of terms without losing
+fidelity: a natural spline whose basis depends on knots chosen from the data, a
+Fine-Gray model whose interval needs the baseline-hazard variance, or any fit
+whose 95% interval must come from the coefficient covariance rather than from a
+residual standard deviation. For these, a pack declares
+`"engine": "design"` and carries the fit itself:
+
+```json
+{
+  "id": "R2", "kind": "risk", "engine": "design", "primaryHorizon": 2,
+  "design": {
+    "kind": "competing_risks",
+    "cols": ["ns(edad, df = 2)1", "...", "estadios"],
+    "beta": [0.111, "..."],
+    "vcov": [[...]],
+    "vars": {
+      "edad": { "type": "continuous", "lo": 18, "hi": 85, "median": 56,
+                "n": 257, "cols": [1, 2], "basis": [[...], [...]] },
+      "sexo": { "type": "categorical", "keys": ["Female", "Male"],
+                "cols": 3, "basis": [0, 1] }
+    },
+    "horizons": [1, 2, 3, 4, 5],
+    "baseline_H0": [0.0131, 0.0181, 0.0214, 0.0243, 0.0274],
+    "var_a": [...], "var_b": [[...]]
+  }
+}
+```
+
+The idea that makes this work is `basis`: instead of reimplementing `ns()` in
+the browser, the export samples each continuous variable's design columns over
+`n` points from `lo` to `hi`, and the console interpolates between them at
+scoring time. A value outside `[lo, hi]` is scored at the nearest edge and
+reported on the card as out of range — the console never extrapolates a spline
+past the data it was fitted on.
+
+The arithmetic is exactly that of `predict.js` in the analysis package:
+
+- `lp = x'β`, `var(lp) = x'Vx`
+- logistic: `p = logit⁻¹(lp)`, interval `logit⁻¹(lp ± 1.96·√(x'Vx))`
+- competing risks: `CIF(t) = 1 − exp(−H₀(t)·e^{lp})`, with
+  `var(log Λ(t|x)) = a(t) + b(t)'x + x'Vx` so the interval carries the
+  uncertainty of the baseline hazard and its covariance with the coefficients.
+
+Two consequences worth knowing. Every variable in `design.vars` is required —
+there is no partial scoring, and the console reports which value is missing
+rather than producing a number. And `median` is what the driver chart scores
+against, so it should be the derivation-cohort median, not a round number.
+
+### Converting an ESSG analysis package
+
+`tools/pack_from_essg.py` does this conversion end to end for the ASD
+risk-benefit package:
+
+```
+python3 tools/pack_from_essg.py /path/to/ASD_RiskBenefitPackage -o essg-asd-pack.json
+```
+
+It reads `results/tool_models.json` for the fits, the `model_*_spec.txt` files
+for the analytic denominators, `model_*_performance_iecv.csv` for the pooled
+leave-one-centre-out figures, and `events_summary.csv` for the base rates. The
+English labels, the group layout, the what-if levers and the patient wording
+live in tables at the top of that script — that is where to edit them.
+
+The generated pack contains fitted coefficients, covariances and per-centre
+validation figures. It contains no patient records, but it is unpublished
+research output: `.gitignore` keeps `models/essg-*.json` out of the repository,
+and it should stay out of any public one.
+
+## 5. The three term-based model types
 
 ### Logistic — a yes/no outcome
 
@@ -280,6 +350,22 @@ the sentence, and no adjective that does the patient's judging for them — "23 
 100" is information, "a low risk" is your opinion wearing a number's clothes.
 
 ---
+
+## 8b. What the console does with your performance figures
+
+The `performance` block is not decoration. Three of its fields change what the
+card says:
+
+| Field | Threshold | What appears |
+|---|---|---|
+| `c` (or `auc`, `cIndex`) | below 0.65 | "This model separates patients … only weakly. Its estimate will sit close to the cohort average whatever you enter." |
+| `calibrationSlope` | outside 0.7–1.4 | predictions are too extreme, or too flat, with the direction named |
+| `oe` | outside 0.8–1.25 | the model under- or over-predicts on average |
+
+This is deliberate. A model that discriminates at C 0.57 will still return a
+confident-looking percentage, and nothing on the screen would otherwise stop a
+patient reading it as a fact about them. Report the figures honestly and the
+console will do the arguing for you.
 
 ## 9. Before a pack is used with a patient
 

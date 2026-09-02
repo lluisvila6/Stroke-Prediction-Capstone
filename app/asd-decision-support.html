@@ -214,12 +214,13 @@ a{color:var(--benefit)}
 .readline__label{font-size:12px; color:var(--ink-2); min-width:0}
 .readline__val{font-family:var(--mono); font-size:15px; font-weight:600; font-variant-numeric:tabular-nums}
 .readline__val--na{font-size:11.5px; font-weight:400; color:var(--ink-3); font-family:var(--sans)}
-.readline__bar{grid-column:1/-1; height:3px; border-radius:2px; background:var(--surface-3); overflow:hidden}
-.readline__bar i{display:block; height:100%}
+.readline__bar{grid-column:1/-1; height:3px; border-radius:2px; background:var(--surface-3); overflow:hidden; position:relative}
+.readline__bar i{display:block; height:100%; position:relative}
+.readline__bar u{position:absolute; top:0; bottom:0; opacity:.35; border-radius:2px}
 [data-kind="risk"] .readline__val{color:var(--risk)}
-[data-kind="risk"] .readline__bar i{background:var(--risk)}
+[data-kind="risk"] .readline__bar i, [data-kind="risk"] .readline__bar u{background:var(--risk)}
 [data-kind="benefit"] .readline__val{color:var(--benefit)}
-[data-kind="benefit"] .readline__bar i{background:var(--benefit)}
+[data-kind="benefit"] .readline__bar i, [data-kind="benefit"] .readline__bar u{background:var(--benefit)}
 
 /* ---------- prediction cards ---------- */
 .cardgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:16px; align-items:start}
@@ -247,6 +248,14 @@ a{color:var(--benefit)}
 [data-kind="risk"] .icons .off{fill:var(--risk-ghost)}
 [data-kind="benefit"] .icons{color:var(--benefit)}
 .iconkey{display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-2); margin-top:8px}
+.ivbar{margin-top:12px; max-width:360px}
+.ivbar__track{position:relative; height:7px; border-radius:2px; background:var(--surface-3)}
+.ivbar__span{position:absolute; top:0; bottom:0; border-radius:2px; opacity:.4}
+.ivbar__tick{position:absolute; top:-3px; bottom:-3px; width:2px; border-radius:1px}
+[data-kind="risk"] .ivbar__span, [data-kind="risk"] .ivbar__tick{background:var(--risk)}
+[data-kind="benefit"] .ivbar__span, [data-kind="benefit"] .ivbar__tick{background:var(--benefit)}
+.ivbar__ends{display:flex; justify-content:space-between; gap:8px; margin-top:4px; font-size:10.5px; color:var(--ink-3); font-family:var(--mono)}
+.ivbar__cap{font-family:var(--sans); text-align:center}
 .iconkey span{display:flex; align-items:center; gap:6px}
 .swatch{width:9px; height:9px; border-radius:2px; flex:none}
 
@@ -295,7 +304,8 @@ a{color:var(--benefit)}
 .lever__from{font-family:var(--mono); font-size:11.5px; color:var(--ink-3)}
 .deltatable{width:auto; min-width:100%; border-collapse:collapse; font-size:12.5px}
 .deltatable th:first-child, .deltatable td:first-child{min-width:230px}
-.deltatable th:not(:first-child), .deltatable td:not(:first-child){white-space:nowrap}
+.deltatable td:not(:first-child){white-space:nowrap}
+.deltatable th:not(:first-child){white-space:normal; min-width:76px; max-width:104px}
 .deltatable th{
   text-align:left; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
   color:var(--ink-3); font-weight:600; padding:8px 14px; border-bottom:1px solid var(--line);
@@ -1063,6 +1073,13 @@ function referenceData(pack){
 /* ================================================================
    4. Term and model evaluation
    ================================================================ */
+function modelVars(model, pack){
+  if (model.engine === 'design') return Object.keys(model.design.vars);
+  const out = new Set();
+  for (const t of model.terms || []) termVars(t, pack).forEach(v => out.add(v));
+  return [...out];
+}
+
 function termVars(term, pack){
   if (term.expr){
     const ids = [...exprCache(term.expr).idents];
@@ -1120,7 +1137,150 @@ function linearPredictor(model, scope, pack){
   return { lp, parts, missing:[...missing] };
 }
 
+/* ================================================================
+   4b. The design-matrix engine
+   For models exported with their full design matrix rather than as a list of
+   readable terms: the pack carries the fitted coefficients, their covariance,
+   and — for every continuous variable — the spline basis sampled over a grid,
+   so ns() need not be reimplemented here.
+
+   The arithmetic below (grid interpolation, lp = x'b, var(lp) = x'Vx, and the
+   Fine-Gray cumulative incidence with its baseline-hazard variance term) is
+   taken from predict.js in the ESSG reproducibility package, which was checked
+   against R over the whole derivation cohort. It is reproduced rather than
+   rewritten so that parity with R survives.
+   ================================================================ */
+const Z95 = 1.959964;
+
+function dArr(x){ return Array.isArray(x) ? x : [x]; }
+function dMatrix(b){
+  if (!Array.isArray(b)) return [[b]];
+  return (typeof b[0] === 'number') ? [b] : b.map(dArr);
+}
+
+/* jsonlite collapses length-1 vectors on export; restore the shapes once. */
+function normalizeDesign(d){
+  if (d.__normalized) return d;
+  d.cols = dArr(d.cols); d.beta = dArr(d.beta); d.vcov = dMatrix(d.vcov);
+  if (d.horizons){
+    d.horizons = dArr(d.horizons); d.baseline_H0 = dArr(d.baseline_H0);
+    d.var_a = dArr(d.var_a); d.var_b = dMatrix(d.var_b);
+  }
+  for (const v in d.vars){
+    const V = d.vars[v];
+    V.cols = dArr(V.cols); V.basis = dMatrix(V.basis);
+    if (V.keys) V.keys = dArr(V.keys).map(String);
+  }
+  Object.defineProperty(d, '__normalized', { value:true });
+  return d;
+}
+
+function basisAt(v, x){
+  if (v.type === 'continuous'){
+    let xi = Number(x), clamped = false;
+    if (xi < v.lo){ xi = v.lo; clamped = true; }
+    if (xi > v.hi){ xi = v.hi; clamped = true; }
+    const pos = (xi - v.lo) / (v.hi - v.lo) * (v.n - 1);
+    const i0 = Math.floor(pos), i1 = Math.min(i0 + 1, v.n - 1), w = pos - i0;
+    return { vals: v.basis.map(col => col[i0] * (1 - w) + col[i1] * w), clamped };
+  }
+  const k = v.keys.indexOf(String(x));
+  if (k < 0) throw new Error('Unrecognised value "' + x + '"');
+  return { vals: v.basis.map(col => col[k]), clamped:false };
+}
+
+/* The console stores booleans as true/false and categories as option values;
+   the exported fits expect the level keys they were built with. */
+function designValue(v, raw){
+  if (v.type === 'binary') return (raw === true || raw === 1 || raw === '1') ? '1' : '0';
+  return raw;
+}
+
+function designRow(d, pack, data){
+  const x = new Array(d.cols.length).fill(0), clamped = [];
+  if (d.cols[0] === '(Intercept)') x[0] = 1;
+  for (const name in d.vars){
+    const v = d.vars[name];
+    const b = basisAt(v, designValue(v, data[name]));
+    v.cols.forEach((c, j) => { x[c - 1] = b.vals[j]; });
+    if (b.clamped) clamped.push(name);
+  }
+  return { x, clamped };
+}
+
+const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+function quadForm(x, V){
+  let s = 0;
+  for (let i = 0; i < x.length; i++){
+    if (x[i] === 0) continue;
+    const row = V[i]; let acc = 0;
+    for (let j = 0; j < x.length; j++) if (x[j] !== 0) acc += row[j] * x[j];
+    s += x[i] * acc;
+  }
+  return s;
+}
+
+function evaluateDesignModel(model, pack, data, refData){
+  const d = normalizeDesign(model.design);
+  const out = { id: model.id, model, warnings: [], missing: [] };
+
+  for (const name in d.vars) if (isMissing(data[name])) out.missing.push(name);
+  out.ok = out.missing.length === 0;
+  if (!out.ok) return out;
+
+  const row = designRow(d, pack, data);
+  const lp = dot(row.x, d.beta);
+  const qf = Math.max(quadForm(row.x, d.vcov), 0);
+  out.lp = lp;
+  out.clamped = row.clamped;
+
+  if (d.kind === 'logistic'){
+    const se = Math.sqrt(qf);
+    out.prob = invLogit(lp);
+    out.lo = invLogit(lp - Z95 * se);
+    out.hi = invLogit(lp + Z95 * se);
+  } else if (d.kind === 'competing_risks'){
+    /* var(log Λ(t|x)) = a(t) + b(t)'x + x'Vx — the a + b'x term carries the
+       uncertainty of the baseline hazard and its covariance with the
+       coefficients, which are not independent of the linear predictor. */
+    const e = Math.exp(lp);
+    out.curve = d.horizons.map((h, i) => {
+      const u = d.baseline_H0[i] * e;
+      const sl = Math.sqrt(Math.max(d.var_a[i] + dot(d.var_b[i], row.x) + qf, 0));
+      return { year:h, risk: 1 - Math.exp(-u),
+               lo: 1 - Math.exp(-u * Math.exp(-Z95 * sl)),
+               hi: 1 - Math.exp(-u * Math.exp(Z95 * sl)) };
+    });
+    const at = out.curve.find(c => c.year === model.primaryHorizon) || out.curve[out.curve.length - 1];
+    out.prob = at.risk; out.lo = at.lo; out.hi = at.hi;
+  } else {
+    out.ok = false; out.warnings.push('Unsupported design model kind "' + d.kind + '".');
+    return out;
+  }
+
+  /* Drivers: each variable's own block of columns, scored against a reference
+     patient built from the derivation-cohort medians. */
+  const refRow = designRow(d, pack, refData || {});
+  out.drivers = Object.keys(d.vars).map(name => {
+    const v = d.vars[name], pv = pack.variables.find(x => x.id === name);
+    let delta = 0;
+    v.cols.forEach(c => { delta += d.beta[c - 1] * (row.x[c - 1] - refRow.x[c - 1]); });
+    return { label: (pv && pv.label) || name, delta, contribution: delta };
+  }).filter(x => Math.abs(x.delta) > 1e-9)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  for (const name of row.clamped){
+    const v = pack.variables.find(x => x.id === name), dv = d.vars[name];
+    out.warnings.push((v ? v.label : name) + ' (' + fmtNum(data[name], (v && v.decimals) ?? 1) +
+      (v && v.unit ? ' ' + v.unit : '') + ') lies outside the range seen in the derivation cohort (' +
+      fmtNum(dv.lo, 1) + ' to ' + fmtNum(dv.hi, 1) +
+      '). The estimate was computed at the nearest edge of that range, not extrapolated beyond it.');
+  }
+  return out;
+}
+
 function evaluateModel(model, pack, data, refScope){
+  if (model.engine === 'design') return evaluateDesignModel(model, pack, data, state.refData);
   const scope = buildScope(pack, data);
   const main = linearPredictor(model, scope, pack);
   const out = {
@@ -1221,6 +1381,56 @@ function personIcons(p, total){
   return s + '</div>';
 }
 
+/* The 95% interval, on the same 0-100 scale as the icon array above it. */
+function intervalBar(p, lo, hi, kind){
+  if (lo == null || hi == null) return '';
+  const L = lo * 100, H = hi * 100, P = p * 100;
+  return '<div class="ivbar" data-kind="' + kind + '">' +
+    '<div class="ivbar__track">' +
+      '<span class="ivbar__span" style="left:' + L.toFixed(1) + '%; width:' + Math.max(0.6, H - L).toFixed(1) + '%"></span>' +
+      '<span class="ivbar__tick" style="left:' + P.toFixed(1) + '%"></span>' +
+    '</div>' +
+    '<div class="ivbar__ends"><span>' + inHundred(lo) + '</span>' +
+    '<span class="ivbar__cap">95% interval, in 100 patients</span>' +
+    '<span>' + inHundred(hi) + '</span></div></div>';
+}
+
+/* Annual cumulative incidence: this patient against the registry as a whole. */
+function cifChart(curve, cohort, kind){
+  if (!curve || curve.length < 2) return '';
+  const W = 340, H = 148, ml = 34, mr = 58, mt = 14, mb = 26;
+  const years = curve.map(c => c.year);
+  const top = Math.max(...curve.map(c => c.hi ?? c.risk), ...(cohort || []).map(c => c.risk)) * 1.15;
+  const ymax = Math.max(0.05, Math.ceil(top * 20) / 20);
+  const X = y => ml + (y - years[0]) / (years[years.length - 1] - years[0]) * (W - ml - mr);
+  const Y = v => mt + (1 - v / ymax) * (H - mt - mb);
+  const path = (pts, key) => pts.map((c, i) => (i ? 'L' : 'M') + X(c.year).toFixed(1) + ' ' + Y(c[key]).toFixed(1)).join(' ');
+  const band = curve.every(c => c.lo != null)
+    ? '<path d="' + path(curve, 'hi') + ' ' + curve.slice().reverse().map(c => 'L' + X(c.year).toFixed(1) + ' ' + Y(c.lo).toFixed(1)).join(' ') +
+      ' Z" fill="var(--' + kind + ')" opacity="0.15"></path>' : '';
+  const grid = [0, ymax / 2, ymax].map(v =>
+    '<line x1="' + ml + '" y1="' + Y(v).toFixed(1) + '" x2="' + (W - mr) + '" y2="' + Y(v).toFixed(1) +
+    '" stroke="var(--line)" stroke-width="1"></line>' +
+    '<text x="' + (ml - 6) + '" y="' + (Y(v) + 3.5).toFixed(1) + '" text-anchor="end" font-size="9" fill="var(--ink-3)">' +
+    Math.round(v * 100) + '%</text>').join('');
+  const ticks = years.map(y =>
+    '<text x="' + X(y).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="var(--ink-3)">' + y + '</text>').join('');
+  const last = curve[curve.length - 1];
+  const cohortLine = cohort ? '<path d="' + path(cohort, 'risk') + '" fill="none" stroke="var(--ink-3)" stroke-width="1.5"></path>' +
+    '<text x="' + (W - mr + 5) + '" y="' + (Y(cohort[cohort.length - 1].risk) + 3).toFixed(1) +
+    '" font-size="9" fill="var(--ink-3)">registry</text>' : '';
+  return '<div><div class="eyebrow" style="margin-bottom:6px">Risk year by year</div>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Cumulative incidence by year">' +
+    grid + band + cohortLine +
+    '<path d="' + path(curve, 'risk') + '" fill="none" stroke="var(--' + kind + ')" stroke-width="2"></path>' +
+    curve.map(c => '<circle cx="' + X(c.year).toFixed(1) + '" cy="' + Y(c.risk).toFixed(1) +
+      '" r="2.6" fill="var(--' + kind + ')" stroke="var(--surface)" stroke-width="1.5"></circle>').join('') +
+    '<text x="' + (W - mr + 5) + '" y="' + (Y(last.risk) + 3).toFixed(1) + '" font-size="9" font-weight="600" fill="var(--' + kind + ')">this case</text>' +
+    ticks + '<text x="' + ((ml + W - mr) / 2).toFixed(0) + '" y="' + (H - 8) +
+    '" text-anchor="middle" font-size="9" fill="var(--ink-3)" dx="0" opacity="0"></text>' +
+    '</svg><div style="font-size:10.5px; color:var(--ink-3); text-align:center; margin-top:-4px">years after surgery</div></div>';
+}
+
 /* ================================================================
    6. Application state
    ================================================================ */
@@ -1230,7 +1440,8 @@ const state = {
   data: {},
   isExample: true,
   results: [],
-  refScope: null
+  refScope: null,
+  refData: null
 };
 
 const VIEWS = [
@@ -1255,7 +1466,8 @@ function validatePack(pack){
   const warn = m => problems.push({ sev:'warn',  msg:m });
 
   if (!pack || typeof pack !== 'object') { err('The file is not a JSON object.'); return problems; }
-  if (pack.schemaVersion !== '1.0') warn('schemaVersion is "' + pack.schemaVersion + '"; this console was built for "1.0".');
+  if (!['1.0', '1.1'].includes(pack.schemaVersion))
+    warn('schemaVersion is "' + pack.schemaVersion + '"; this console was built for "1.0" and "1.1".');
   if (!pack.pack || !pack.pack.name) err('pack.name is required.');
   const okStatus = ['validated','externally-validated','internally-validated','demonstration'];
   if (!pack.pack || !okStatus.includes(pack.pack.validationStatus))
@@ -1286,8 +1498,28 @@ function validatePack(pack){
     if (!m.id || !m.label) { err('Every model needs an id and a label.'); continue; }
     if (modelIds.has(m.id)) err('Duplicate model id "' + m.id + '".');
     modelIds.add(m.id);
-    if (!['logistic','linear','cox'].includes(m.type)) err('Model "' + m.id + '" has unsupported type "' + m.type + '".');
     if (!['risk','benefit'].includes(m.kind)) err('Model "' + m.id + '" must declare kind "risk" or "benefit".');
+    if (m.engine === 'design'){
+      const d = m.design;
+      if (!d) { err('Model "' + m.id + '" declares engine "design" but has no design block.'); continue; }
+      if (!['logistic','competing_risks'].includes(d.kind))
+        err('Design model "' + m.id + '" has unsupported kind "' + d.kind + '".');
+      if (!d.cols || !d.beta || !d.vcov) err('Design model "' + m.id + '" needs cols, beta and vcov.');
+      else if (dArr(d.cols).length !== dArr(d.beta).length)
+        err('Design model "' + m.id + '" has ' + dArr(d.cols).length + ' columns but ' + dArr(d.beta).length + ' coefficients.');
+      if (!d.vars || !Object.keys(d.vars).length) err('Design model "' + m.id + '" declares no variables.');
+      for (const name in (d.vars || {}))
+        if (!ids.has(name)) err('Design model "' + m.id + '" scores "' + name + '", which is not a variable in this pack.');
+      if (d.kind === 'competing_risks'){
+        if (!d.horizons || !d.baseline_H0) err('Competing-risks model "' + m.id + '" needs horizons and baseline_H0.');
+        if (m.primaryHorizon && !dArr(d.horizons).includes(m.primaryHorizon))
+          err('Model "' + m.id + '" names primary horizon ' + m.primaryHorizon + ', which is not among its horizons.');
+      }
+      if (typeof m.baselineRate !== 'number')
+        warn('Model "' + m.id + '" has no baselineRate, so no cohort comparison can be drawn.');
+      continue;
+    }
+    if (!['logistic','linear','cox'].includes(m.type)) err('Model "' + m.id + '" has unsupported type "' + m.type + '".');
     if (m.type === 'cox' && !(m.baselineSurvival || []).length) err('Cox model "' + m.id + '" needs baselineSurvival.');
     if (m.type === 'linear' && !m.sigma) warn('Linear model "' + m.id + '" has no sigma, so no prediction interval can be shown.');
     if (!Array.isArray(m.terms) || !m.terms.length) { err('Model "' + m.id + '" has no terms.'); continue; }
@@ -1321,7 +1553,8 @@ function loadPack(pack, source){
   if (problems.some(p => p.sev === 'error')) return problems;
   state.pack = pack;
   state.packSource = source;
-  state.refScope = buildScope(pack, referenceData(pack));
+  state.refData = referenceData(pack);
+  state.refScope = buildScope(pack, state.refData);
   resetCase(true);
   renderChrome();
   render();
@@ -1346,8 +1579,7 @@ function computeAll(data){
 
 function completeness(){
   const used = new Set();
-  for (const m of state.pack.models)
-    for (const t of m.terms) termVars(t, state.pack).forEach(v => used.add(v));
+  for (const m of state.pack.models) modelVars(m, state.pack).forEach(v => used.add(v));
   const derivedIds = new Set((state.pack.derived || []).map(d => d.id));
   const needed = [...used].filter(id => !derivedIds.has(id));
   for (const d of (state.pack.derived || [])){
@@ -1397,17 +1629,16 @@ function renderChrome(){
   const d = state.data;
   $('#caseTitle').textContent = d.patient_ref || 'Untitled case';
   $('#caseTag').hidden = !state.isExample;
-  const bits = [];
-  const v = id => state.pack.variables.find(x => x.id === id);
-  const lbl = id => {
-    const vr = v(id); if (!vr || isMissing(d[id])) return null;
-    if (vr.type === 'categorical') return (vr.options.find(o => String(o.value) === String(d[id])) || {}).label;
-    if (vr.type === 'boolean') return d[id] ? vr.label : null;
-    return fmtNum(d[id], vr.decimals) + (vr.unit ? ' ' + vr.unit : '');
-  };
-  if (lbl('age')) bits.push(lbl('age'));
-  if (lbl('sex')) bits.push(lbl('sex'));
-  if (lbl('levels_fused')) bits.push(lbl('levels_fused') + ' instrumented');
+  const scored = new Set();
+  for (const m of state.pack.models) modelVars(m, state.pack).forEach(x => scored.add(x));
+  const bits = state.pack.variables
+    .filter(v => scored.has(v.id) && v.type !== 'text' && !isMissing(d[v.id]))
+    .slice(0, 3)
+    .map(v => v.type === 'categorical'
+        ? ((v.options.find(o => String(o.value) === String(d[v.id])) || {}).label)
+        : v.type === 'boolean'
+          ? (d[v.id] ? v.label : 'no ' + v.label.toLowerCase())
+          : fmtNum(d[v.id], v.decimals) + (v.unit && !/^\d/.test(v.unit) ? ' ' + v.unit : '') + ' ' + v.label.toLowerCase());
   const c = completeness();
   bits.push(c.have + ' of ' + c.total + ' model inputs entered');
   $('#caseSummary').textContent = bits.filter(Boolean).join(' · ');
@@ -1428,7 +1659,7 @@ function renderForm(){
   if (spill.length) { groups.push({ id:'__other', label:'Other inputs' }); byGroup.set('__other', spill); }
 
   const usedByModels = new Set();
-  for (const m of pack.models) for (const t of m.terms) termVars(t, pack).forEach(x => usedByModels.add(x));
+  for (const m of pack.models) modelVars(m, pack).forEach(x => usedByModels.add(x));
 
   let html = '';
   for (const g of groups){
@@ -1508,10 +1739,12 @@ function readLine(r){
       '<span class="readline__label">' + esc(label) + '</span>' +
       '<span class="readline__val">' + fmtNum(r.value, 0) + (m.unit ? ' <span style="font-size:10.5px; font-weight:400; color:var(--ink-3)">' + esc(m.unit) + '</span>' : '') + '</span></button>';
   }
+  const band = (r.lo != null && r.hi != null)
+    ? '<u style="left:' + (r.lo * 100).toFixed(1) + '%; width:' + Math.max(0.8, (r.hi - r.lo) * 100).toFixed(1) + '%"></u>' : '';
   return '<button class="readline" data-goto="' + m.id + '" data-kind="' + m.kind + '">' +
     '<span class="readline__label">' + esc(label) + '</span>' +
     '<span class="readline__val">' + fmtPct(r.prob) + '</span>' +
-    '<span class="readline__bar"><i style="width:' + (r.prob * 100).toFixed(1) + '%"></i></span></button>';
+    '<span class="readline__bar">' + band + '<i style="width:' + (r.prob * 100).toFixed(1) + '%"></i></span></button>';
 }
 
 function renderReadout(){
@@ -1545,7 +1778,7 @@ function renderReadout(){
 function compareChart(r){
   const m = r.model;
   if (typeof m.baselineRate !== 'number') return '';
-  const max = Math.min(1, Math.max(r.prob, m.baselineRate) * 1.45 + 0.03);
+  const max = Math.min(1, Math.ceil(Math.max(r.prob, m.baselineRate) * 1.35 * 10) / 10);
   const row = (lab, val, strong) =>
     '<div class="compare__row"><span class="compare__lab">' + esc(lab) + '</span>' +
     '<span class="compare__track"><i style="width:' + Math.min(100, val / max * 100).toFixed(1) +
@@ -1587,9 +1820,34 @@ function driversBlock(r){
     '</div></details>';
 }
 
+/* An estimate is only worth as much as the model behind it. When
+   discrimination is near chance or calibration is far off, say so on the card
+   rather than leaving it to be inferred from a number in the footer. */
+function modelCaution(r){
+  const p = r.model.performance || {}, out = [];
+  const c = p.c ?? p.auc ?? p.cIndex;
+  if (c != null && c < 0.65)
+    out.push('This model separates patients who have the outcome from those who do not only weakly (C ' + c.toFixed(2) +
+      (p.cLo != null && p.cHi != null ? ', 95% CI ' + p.cLo.toFixed(2) + '–' + p.cHi.toFixed(2) : '') +
+      '). Its estimate for this patient will sit close to the cohort average whatever you enter, and should carry little weight in the decision.');
+  if (p.calibrationSlope != null && (p.calibrationSlope < 0.7 || p.calibrationSlope > 1.4))
+    out.push('Calibration slope ' + p.calibrationSlope.toFixed(2) + ' on cross-validation: predictions are ' +
+      (p.calibrationSlope < 1 ? 'too extreme — high estimates run high and low ones run low' : 'too flat') +
+      '. Read the number as a direction, not as a figure to quote.');
+  if (p.oe != null && (p.oe < 0.8 || p.oe > 1.25))
+    out.push('Observed-to-expected ratio ' + p.oe.toFixed(2) + ' across centres: the model ' +
+      (p.oe > 1 ? 'under-predicts' : 'over-predicts') + ' this outcome on average.');
+  if (!out.length) return '';
+  return out.map(t => '<div class="notice"><span class="notice__icon">!</span><span>' + esc(t) + '</span></div>').join('');
+}
+
 function perfLine(r){
   const p = r.model.performance || {};
   const bits = [];
+  if (p.c != null) bits.push('C ' + p.c.toFixed(2) + (p.cLo != null && p.cHi != null ? ' (' + p.cLo.toFixed(2) + '–' + p.cHi.toFixed(2) + ')' : ''));
+  if (p.cOptimismCorrected != null) bits.push('optimism-corrected ' + p.cOptimismCorrected.toFixed(2));
+  if (p.oe != null) bits.push('O:E ' + p.oe.toFixed(2));
+  if (p.centres) bits.push(p.centres + ' centres');
   if (p.auc) bits.push('AUC ' + p.auc.toFixed(2));
   if (p.cIndex) bits.push('C ' + p.cIndex.toFixed(2));
   if (p.r2) bits.push('R² ' + p.r2.toFixed(2));
@@ -1605,6 +1863,14 @@ function warningsBlock(r){
   if (!r.warnings.length) return '';
   return r.warnings.map(w =>
     '<div class="notice"><span class="notice__icon">!</span><span>' + esc(w) + '</span></div>').join('');
+}
+
+function modelTypeLabel(m){
+  const kind = m.engine === 'design' ? m.design.kind : m.type;
+  return kind === 'competing_risks' ? 'Competing-risks model, cumulative incidence'
+       : kind === 'cox' ? 'Time-to-event model'
+       : kind === 'linear' ? 'Continuous outcome model'
+       : 'Binary outcome model';
 }
 
 function predictionCard(r){
@@ -1637,18 +1903,21 @@ function predictionCard(r){
         esc(inHundred(r.prob)) + ' of 100 — ' + (m.kind === 'risk' ? 'this happens' : 'this is achieved') + '</span>' +
       '<span><span class="swatch" style="background:var(--' + m.kind + '-ghost)"></span>' +
         esc(inHundred(1 - r.prob)) + ' of 100 — it does not</span></div>';
+    const ci = (r.lo != null && r.hi != null)
+      ? ' The model puts that somewhere between <b>' + esc(inHundred(r.lo)) + '</b> and <b>' + esc(inHundred(r.hi)) + ' in 100</b>.'
+      : '';
     body =
       '<div class="headline"><span class="headline__num">' + fmtPct(r.prob) + '</span>' +
       '<span class="headline__txt">About <b>' + esc(inHundred(r.prob)) + ' in 100</b> patients with this profile ' +
-      esc((m.patient && m.patient.positive) || 'reach this outcome') + ' by ' + esc(m.timepoint || 'follow-up') + '.</span></div>' +
-      '<div>' + personIcons(r.prob) + key + '</div>' +
-      compareChart(r) + warningsBlock(r);
+      esc((m.patient && m.patient.positive) || 'reach this outcome') + ' ' + esc(m.timepoint || 'at follow-up') + '.' + ci + '</span></div>' +
+      '<div>' + personIcons(r.prob) + key + intervalBar(r.prob, r.lo, r.hi, m.kind) + '</div>' +
+      (r.curve ? cifChart(r.curve, m.cohortCurve, m.kind) : '') +
+      compareChart(r) + modelCaution(r) + warningsBlock(r);
   }
   return '<article class="pcard" id="card-' + m.id + '" data-kind="' + m.kind + '">' +
     '<div class="pcard__stripe"></div>' +
     '<div class="pcard__head"><h3>' + esc(m.label) + '</h3>' +
-    '<div class="sub">' + esc(m.type === 'cox' ? 'Time-to-event model' : m.type === 'linear' ? 'Continuous outcome model' : 'Binary outcome model') +
-    ' · ' + esc(m.timepoint || '—') + '</div></div>' +
+    '<div class="sub">' + esc(modelTypeLabel(m)) + ' · ' + esc(m.timepoint || '—') + '</div></div>' +
     '<div class="pcard__body">' + body + '</div>' +
     (r.ok ? driversBlock(r) : '') +
     (r.ok ? '<div class="pcard__body" style="padding-top:0">' + perfLine(r) + '</div>' : '') +
@@ -1766,10 +2035,13 @@ function reportItem(r){
       (pt.explain ? '<p>' + esc(pt.explain) + '</p>' : '') + '</div>';
   }
   const n = inHundred(r.prob), inv = inHundred(1 - r.prob);
+  const ci = (r.lo != null && r.hi != null)
+    ? '<p class="rep__figure">That figure is not exact. From the records we have, the true number for people like you most likely lies between <b>' +
+      esc(inHundred(r.lo)) + '</b> and <b>' + esc(inHundred(r.hi)) + ' in 100</b>.</p>' : '';
   return '<div class="rep__item" data-kind="' + m.kind + '"><h4>' + esc(pt.title || m.label) + '</h4>' +
     '<p class="rep__figure">Out of 100 patients in your situation, about <b>' + esc(n) + '</b> ' +
     esc(pt.positive || 'reach this outcome') + '. The other <b>' + esc(inv) + '</b> ' +
-    esc(pt.negative || 'do not') + '.</p>' +
+    esc(pt.negative || 'do not') + '.</p>' + ci +
     personIcons(r.prob) +
     '<div class="iconkey"><span><span class="swatch" style="background:var(--' + m.kind + ')"></span>' + esc(n) +
     ' in 100</span><span><span class="swatch" style="background:var(--' + m.kind + '-ghost)"></span>' + esc(inv) +
@@ -1877,9 +2149,39 @@ function termText(t){
 function renderModels(){
   const pack = state.pack, p = pack.pack;
   const problems = validatePack(pack);
+  const designSpec = m => {
+    const d = normalizeDesign(m.design), pf = m.performance || {};
+    const rows = Object.keys(d.vars).map(name => {
+      const v = d.vars[name], pv = pack.variables.find(x => x.id === name);
+      const shape = v.type === 'continuous'
+        ? (v.cols.length > 1 ? 'natural spline, ' + v.cols.length + ' df' : 'linear') +
+          ' over ' + fmtNum(v.lo, 1) + ' to ' + fmtNum(v.hi, 1)
+        : 'indicator (' + v.keys.join(' / ') + ')';
+      return '<tr><td><code>' + esc(name) + '</code></td><td>' + esc((pv && pv.label) || '') + '</td><td>' + esc(shape) +
+             '</td><td class="num">' + v.cols.join(', ') + '</td></tr>';
+    }).join('');
+    return '<div class="scroll-x"><table class="spectable"><thead><tr><th>Variable</th><th>Reads as</th><th>Entered as</th><th>Design columns</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>' +
+      '<div class="panel__body"><dl class="kv">' +
+      '<dt>Form</dt><dd>' + (d.kind === 'competing_risks'
+        ? 'Fine-Gray subdistribution model, cumulative incidence at ' + dArr(d.horizons).join(', ') + ' years' +
+          (m.primaryHorizon ? ' (primary horizon ' + m.primaryHorizon + ')' : '')
+        : 'Logistic regression') + '</dd>' +
+      '<dt>Design columns</dt><dd class="num">' + d.cols.length + '</dd>' +
+      '<dt>Intervals</dt><dd>From the fitted covariance' +
+        (d.kind === 'competing_risks' ? ', combined with baseline-hazard uncertainty' : '') + '</dd>' +
+      (pf.n ? '<dt>Fitted on</dt><dd class="num">' + pf.n + ' patients' + (pf.events ? ', ' + pf.events + ' events' : '') + '</dd>' : '') +
+      (pf.validation ? '<dt>Validation</dt><dd>' + esc(pf.validation) + '</dd>' : '') +
+      '</dl>' +
+      '<div class="notice notice--plain" style="margin-top:12px"><span class="notice__icon">i</span><span>' +
+      'Coefficients and covariance are carried in the pack but not printed here: this model has ' + d.cols.length +
+      ' columns and the readable form is the equation in the source package, not a table on a screen.</span></div></div>';
+  };
+
   const specs = pack.models.map(m =>
     '<div class="panel" style="margin-bottom:14px"><div class="panel__head"><h3>' + esc(m.label) + '</h3>' +
-    '<span class="tag" style="margin-left:auto">' + esc(m.type) + ' · ' + esc(m.kind) + '</span></div>' +
+    '<span class="tag" style="margin-left:auto">' + esc(m.engine === 'design' ? m.design.kind : m.type) + ' · ' + esc(m.kind) + '</span></div>' +
+    (m.engine === 'design' ? designSpec(m) :
     '<div class="scroll-x"><table class="spectable"><thead><tr><th>Term</th><th>Coefficient</th><th>Reads as</th></tr></thead><tbody>' +
     '<tr><td><code>(intercept)</code></td><td class="num">' + fmtNum(m.intercept ?? 0, 3) + '</td><td>—</td></tr>' +
     m.terms.map(t => '<tr><td>' + termText(t) + '</td><td class="num">' + fmtNum(t.coef, 3) + '</td><td>' +
@@ -1887,7 +2189,7 @@ function renderModels(){
     (m.type === 'cox' ? '<tr><td><code>baselineSurvival</code></td><td class="num">' +
       esc((m.baselineSurvival || []).map(b => b.t + 'm: ' + b.s0).join('  ')) + '</td><td>centred at lp = ' + (m.lpMean || 0) + '</td></tr>' : '') +
     (m.type === 'linear' ? '<tr><td><code>sigma</code></td><td class="num">' + fmtNum(m.sigma, 2) + '</td><td>residual SD, used for the interval</td></tr>' : '') +
-    '</tbody></table></div></div>').join('');
+    '</tbody></table></div>') + '</div>').join('');
 
   $('#modelsBody').innerHTML =
     '<div class="panel" style="margin-bottom:16px"><div class="panel__head"><h3>Loaded pack</h3>' +
